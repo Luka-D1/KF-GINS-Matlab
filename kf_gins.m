@@ -15,10 +15,10 @@ addpath("function\");
 
 %% define parameters and importdata process config
 param = Param();
-cfg = ProcessConfig1();
+%cfg = ProcessConfig1();
 % cfg = ProcessConfig2();
 % cfg = ProcessConfig3();
-
+cfg = ProcessConfig4();
 
 %% importdata data
 % imudata
@@ -270,5 +270,4 @@ fclose(imuerrfp);
 fclose(navfp);
 fclose(stdfp);
 
-disp("GNSS/INS Integration Processing Finished!");
-
+disp("GNSS/INS Integration Processing Finished!")

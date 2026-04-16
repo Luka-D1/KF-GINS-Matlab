@@ -16,7 +16,7 @@ function kf = GNSSUpdate(navstate, gnssdata, kf, antlever, usegnssvel, thisimu, 
     %% GNSS position update
     % abandon gnss vel outlier 
     gnssposstd = gnssdata(5:7, 1);
-    if gnssposstd(1, 1) > 5 || gnssposstd(2, 1) > 5 || gnssposstd(3, 1) > 5
+    if gnssposstd(1, 1) > 9999 || gnssposstd(2, 1) > 9999 || gnssposstd(3, 1) > 9999
         disp(['WARNING: Abandon gnss position measurement at: ', num2str(gnssdata(1, 1))]);
     else
         % measurement innovation
