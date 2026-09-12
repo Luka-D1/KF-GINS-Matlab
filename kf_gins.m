@@ -19,7 +19,7 @@ param = Param();
 % cfg = ProcessConfig2();
 % cfg = ProcessConfig3();
 cfg = ProcessConfig4();
-
+%cfg = ProcessConfig6();
 %% importdata data
 % imudata
 imudata = importdata(cfg.imufilepath);
@@ -42,7 +42,7 @@ end
 
 
 %% save result
-navpath = [cfg.outputfolder, '/NavResult'];
+navpath = [cfg.outputfolder, '/NavResult_100HzTEST'];
 if cfg.usegnssvel
     navpath = [navpath, '_GNSSVEL'];
     disp("use GNSS velocity!");
@@ -101,7 +101,61 @@ imudata = imudata(imudata(:,1) <= cfg.endtime, :);
 gnssdata = gnssdata(gnssdata(:, 1) >= cfg.starttime, :);
 gnssdata = gnssdata(gnssdata(:, 1) <= cfg.endtime, :);
 
+%% ================= 核心修改：模拟 GNSS 失锁 (GNSS Outages) =================
+    % 定义失锁时间段 [开始时间TOW, 结束时间TOW]
+    % 注意：你的数据起步是 268858，所以我给你设定了下面两个测试区间
+    outages = [
+        %270370, 270430;
+        269200, 269260;  % 第一次失锁：起步 5 分钟后，断网 60 秒 (模拟长隧道)
+        %270000, 270030   % 第二次失锁：起步 19 分钟后，断网 30 秒 (模拟立交桥)
+    ];
 
+    % 遍历所有设定的失锁区间，把落在区间内的 GNSS 数据无情删掉！
+    for i = 1:size(outages, 1)
+        outage_start = outages(i, 1);
+        outage_end = outages(i, 2);
+        
+        % 找出不在这个失锁区间内的数据（保留正常的，剔除失锁的）
+        valid_idx = (gnssdata(:, 1) < outage_start) | (gnssdata(:, 1) > outage_end);
+        gnssdata = gnssdata(valid_idx, :);
+    end
+    disp(['已人为注入 ', num2str(size(outages, 1)), ' 个 GNSS 失锁区间段！']);
+    % =========================================================================
+
+
+    %% ================= 核心修改：IMU 降采样实验 =================
+    % 容错设计：如果配置文件里忘了写 downsample_factor，默认设为 1 (不降采样)
+    if ~isfield(cfg, 'downsample_factor')
+        cfg.downsample_factor = 1; 
+    end
+
+    if cfg.downsample_factor > 1
+        factor = cfg.downsample_factor;
+        old_len = size(imudata, 1);
+        new_len = floor(old_len / factor);
+        
+        % 预分配内存，加速运行
+        new_imudata = zeros(new_len, 7); 
+        
+        for k = 1:new_len
+            idx_start = (k-1) * factor + 1;
+            idx_end = k * factor;
+            
+            % 1. 时间戳：取当前压缩窗口的最后一个历元时间
+            new_imudata(k, 1) = imudata(idx_end, 1);
+            
+            % 2. 惯性数据：因为 KF-GINS 输入的是角度/速度增量，必须用 sum() 严格累加能量！
+            new_imudata(k, 2:4) = sum(imudata(idx_start:idx_end, 2:4), 1);
+            new_imudata(k, 5:7) = sum(imudata(idx_start:idx_end, 5:7), 1);
+        end
+        
+        % 偷梁换柱：用降采样后的数据覆盖原内存矩阵
+        imudata = new_imudata;
+        
+        disp(['⚠️ 警告：正在执行 IMU 降采样实验！降采样倍率：', num2str(factor), ...
+              '，等效频率约：', num2str(100/factor), 'Hz']);
+    end
+    % =================================================================
 %% for debug
 disp("Start GNSS/INS Processing!");
 lastprecent = 0;
@@ -130,7 +184,13 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% MAIN PROCEDD PROCEDURE!
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% ================== 新增：开始纯算法计时 ==================
+tic_algorithm = tic; 
+% ==========================================================
+
 for imuindex = 2:size(imudata, 1)-1
+
 
     %% set value of last state
     lastimu = thisimu;
@@ -264,6 +324,17 @@ for imuindex = 2:size(imudata, 1)-1
         lastprecent = imuindex / size(imudata, 1);
     end
 end
+
+% ================== 新增：结束计时并打印 ==================
+algorithm_time = toc(tic_algorithm);  
+disp('--------------------------------------------------');
+disp(['✅ 主解算循环执行完毕！']);
+if isfield(cfg, 'downsample_factor')
+    disp(['⚙️ 当前 IMU 降采样倍率: ', num2str(cfg.downsample_factor), 'x']);
+end
+disp(['⏳ 核心算法解算总耗时: ', num2str(algorithm_time), ' 秒']);
+disp('--------------------------------------------------');
+% ==========================================================
 
 % close file
 fclose(imuerrfp);

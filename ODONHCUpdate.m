@@ -25,9 +25,26 @@ function kf = ODONHCUpdate(navstate, odonhc_vel, kf, cfg, thisimu, dt)
     Z = vel_pre - odonhc_vel;
 
     %% measurement equation and noise
+    H = zeros(3, kf.RANK);
 
-    % TODO: add measurement equation and noise matrix here!!
+    % Velocity error projected from the navigation frame to the vehicle
+    % frame.
+    H(:, 4:6) = cfg.cbv * navstate.cbn';
 
+    % The attitude error changes both the projected IMU velocity and the
+    % rotational velocity at the odometer lever arm. The small dependence
+    % of win_n on position and velocity errors is neglected, consistently
+    % with the observation model in the algorithm document.
+    H(:, 7:9) = -cfg.cbv * navstate.cbn' * skew(navstate.vel) ...
+                  -cfg.cbv * skew(cfg.odolever) * navstate.cbn' * skew(win_n);
+
+    % Gyroscope bias and scale-factor errors affect the angular rate used
+    % in the lever-arm compensation. Accelerometer errors have no direct
+    % contribution to this velocity observation.
+    H(:, 10:12) = -cfg.cbv * skew(cfg.odolever);
+    H(:, 16:18) = -cfg.cbv * skew(cfg.odolever) * diag(wib_b);
+
+    R = diag(cfg.odonhc_measnoise .^ 2);
 
     %% update
     K = kf.P * H' / (H * kf.P * H' + R);
