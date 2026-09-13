@@ -15,11 +15,39 @@ addpath("function\");
 
 %% define parameters and importdata process config
 param = Param();
-%cfg = ProcessConfig1();
-% cfg = ProcessConfig2();
-% cfg = ProcessConfig3();
-cfg = ProcessConfig4();
-%cfg = ProcessConfig6();
+
+% ODO/NHC comparison experiment. Change only this value before each run:
+%   "A" - GNSS/INS,              no simulated GNSS outage
+%   "B" - GNSS/INS + ODO/NHC,    no simulated GNSS outage
+%   "C" - GNSS/INS,              simulated GNSS outage
+%   "D" - GNSS/INS + ODO/NHC,    simulated GNSS outage
+experiment_mode = "B";
+
+% dataset3 contains IMU, GNSS position, ODO and reference truth data.
+cfg = ProcessConfig3();
+
+switch upper(experiment_mode)
+    case "A"
+        experiment_name = "A_GNSS_INS";
+        cfg.useodonhc = false;
+        outages = zeros(0, 2);
+    case "B"
+        experiment_name = "B_GNSS_INS_ODONHC";
+        cfg.useodonhc = true;
+        outages = zeros(0, 2);
+    case "C"
+        experiment_name = "C_GNSS_OUTAGE_INS";
+        cfg.useodonhc = false;
+        outages = [292800, 292860];
+    case "D"
+        experiment_name = "D_GNSS_OUTAGE_INS_ODONHC";
+        cfg.useodonhc = true;
+        outages = [292800, 292860];
+    otherwise
+        error("Unknown experiment_mode: " + experiment_mode);
+end
+
+disp("Experiment: " + experiment_name);
 %% importdata data
 % imudata
 imudata = importdata(cfg.imufilepath);
@@ -42,23 +70,27 @@ end
 
 
 %% save result
-navpath = [cfg.outputfolder, '/NavResult_100HzTEST'];
-if cfg.usegnssvel
-    navpath = [navpath, '_GNSSVEL'];
-    disp("use GNSS velocity!");
+resultfolder = fullfile(cfg.outputfolder, "results");
+if ~exist(resultfolder, "dir")
+    mkdir(resultfolder);
 end
-if cfg.useodonhc
-    navpath = [navpath, '_ODONHC'];
-    disp("use ODO velocity!");
-end
-navpath = [navpath, '.nav'];
+
+navpath = fullfile(resultfolder, "NavResult_" + experiment_name + ".nav");
 navfp = fopen(navpath, 'wt');
 
-imuerrpath = [cfg.outputfolder, '/ImuError.txt'];
+imuerrpath = fullfile(resultfolder, "ImuError_" + experiment_name + ".txt");
 imuerrfp = fopen(imuerrpath, 'wt');
 
-stdpath = [cfg.outputfolder, '/NavSTD.txt'];
+stdpath = fullfile(resultfolder, "NavSTD_" + experiment_name + ".txt");
 stdfp = fopen(stdpath, 'wt');
+
+if navfp < 0 || imuerrfp < 0 || stdfp < 0
+    error("Failed to open one or more result files in: " + resultfolder);
+end
+
+disp("Navigation result: " + navpath);
+disp("IMU error result: " + imuerrpath);
+disp("State STD result: " + stdpath);
 
 
 %% get process time
@@ -101,26 +133,21 @@ imudata = imudata(imudata(:,1) <= cfg.endtime, :);
 gnssdata = gnssdata(gnssdata(:, 1) >= cfg.starttime, :);
 gnssdata = gnssdata(gnssdata(:, 1) <= cfg.endtime, :);
 
-%% ================= 核心修改：模拟 GNSS 失锁 (GNSS Outages) =================
-    % 定义失锁时间段 [开始时间TOW, 结束时间TOW]
-    % 注意：你的数据起步是 268858，所以我给你设定了下面两个测试区间
-    outages = [
-        %270370, 270430;
-        269200, 269260;  % 第一次失锁：起步 5 分钟后，断网 60 秒 (模拟长隧道)
-        %270000, 270030   % 第二次失锁：起步 19 分钟后，断网 30 秒 (模拟立交桥)
-    ];
+%% simulate GNSS outages selected by experiment_mode
+if isempty(outages)
+    disp("GNSS outage simulation: disabled");
+else
+    disp("GNSS outage simulation: " + num2str(size(outages, 1)) + ...
+         " interval(s), " + mat2str(outages));
+end
 
-    % 遍历所有设定的失锁区间，把落在区间内的 GNSS 数据无情删掉！
-    for i = 1:size(outages, 1)
-        outage_start = outages(i, 1);
-        outage_end = outages(i, 2);
-        
-        % 找出不在这个失锁区间内的数据（保留正常的，剔除失锁的）
-        valid_idx = (gnssdata(:, 1) < outage_start) | (gnssdata(:, 1) > outage_end);
-        gnssdata = gnssdata(valid_idx, :);
-    end
-    disp(['已人为注入 ', num2str(size(outages, 1)), ' 个 GNSS 失锁区间段！']);
-    % =========================================================================
+for i = 1:size(outages, 1)
+    outage_start = outages(i, 1);
+    outage_end = outages(i, 2);
+    valid_idx = (gnssdata(:, 1) < outage_start) | ...
+                (gnssdata(:, 1) > outage_end);
+    gnssdata = gnssdata(valid_idx, :);
+end
 
 
     %% ================= 核心修改：IMU 降采样实验 =================
@@ -328,7 +355,7 @@ end
 % ================== 新增：结束计时并打印 ==================
 algorithm_time = toc(tic_algorithm);  
 disp('--------------------------------------------------');
-disp(['✅ 主解算循环执行完毕！']);
+disp('✅ 主解算循环执行完毕！');
 if isfield(cfg, 'downsample_factor')
     disp(['⚙️ 当前 IMU 降采样倍率: ', num2str(cfg.downsample_factor), 'x']);
 end

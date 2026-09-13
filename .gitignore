@@ -12,5 +12,13 @@ dataset3/NavResult_ODONHC.nav
 dataset3/NavSTD.txt
 dataset3/ImuError.txt
 
+# Local experiment outputs
+dataset3/results/
+
+# IDE and logs
+.idea/
+debug.log
+
+# Local experiment datasets
 dataset4/
 dataset5/
